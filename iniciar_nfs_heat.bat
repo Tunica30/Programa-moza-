@@ -1,4 +1,5 @@
 @echo off
 cd /d "%~dp0"
-python -m moza_bridge --perfil nfs_heat
+call "%~dp0_buscar_python.bat" || exit /b 1
+%PY% -m moza_bridge --perfil nfs_heat
 if errorlevel 1 pause
