@@ -65,13 +65,17 @@ def main(argv=None) -> int:
 
 
 def _demo_config(cfg: dict) -> dict:
-    base = "030000006e3400000500000000000000"
-    ped = "030000006e3400000300000000000000"
-    cfg["steering"]["axis"] = {"device": base, "name": "MOZA R5 Base (DEMO)", "index": 0}
+    from .devices import DEMO_GEAR_BUTTONS, DEMO_GUID, DEMO_NAME
+
+    def ref(i):
+        return {"device": DEMO_GUID, "name": DEMO_NAME, "index": i}
+
+    cfg["steering"]["axis"] = ref(0)
     cfg["steering"]["hardware_rotation_deg"] = 900
-    for i, k in enumerate(("throttle", "brake", "clutch")):
-        cfg["pedals"][k].update(axis={"device": ped, "name": "MOZA SR-P Pedals (DEMO)", "index": i},
-                                rest=-1.0, full=1.0)
+    for i, k in ((1, "throttle"), (2, "brake"), (3, "clutch"), (4, "handbrake")):
+        cfg["pedals"][k].update(axis=ref(i), rest=-1.0, full=1.0)
+    cfg["shifter"]["mode"] = "h_secuencial"
+    cfg["shifter"]["gears"] = [dict(ref(DEMO_GEAR_BUTTONS + g - 1), gear=g) for g in range(1, 8)]
     cfg["profile_name"] += " (DEMO)"
     return cfg
 

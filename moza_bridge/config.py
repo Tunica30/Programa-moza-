@@ -15,7 +15,12 @@ XBOX_BUTTONS = [
     "LS", "RS", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "GUIDE",
 ]
 
-PEDAL_OUTPUTS = ["right_trigger", "left_trigger", "none"]
+PEDAL_OUTPUTS = ["right_trigger", "left_trigger", "button", "none"]
+
+SHIFTER_MODES = ["h_secuencial", "none"]
+
+MIN_ROTATION_DEG = 90
+MAX_ROTATION_DEG = 2700
 
 DEFAULT_CONFIG: dict = {
     "profile_name": "General",
@@ -45,6 +50,21 @@ DEFAULT_CONFIG: dict = {
         "clutch": {"label": "Embrague", "axis": None, "rest": -1.0, "full": 1.0,
                    "deadzone": 0.05, "saturation": 0.95, "gamma": 1.0,
                    "output": "none"},
+        # Freno de mano analógico (MOZA HBP en modo eje). Los juegos de mando
+        # usan el freno de mano como botón: se aprieta al pasar el umbral.
+        "handbrake": {"label": "Freno de mano", "axis": None, "rest": -1.0, "full": 1.0,
+                      "deadzone": 0.05, "saturation": 0.90, "gamma": 1.0,
+                      "output": "button", "button": "A", "threshold": 0.30},
+    },
+    # Palanca H (MOZA HGP): cada marcha es un botón. En modo "h_secuencial"
+    # se convierte en toques de marcha arriba/abajo para juegos que sólo
+    # tienen cambios secuenciales (como NFS Heat).
+    "shifter": {
+        "mode": "none",
+        "gears": [],          # [{"device", "name", "index", "gear": 1}, ...]
+        "up_button": "RB",
+        "down_button": "LB",
+        "pulse_ms": 70,
     },
     # Lista de acciones que el asistente pide asignar a botones del volante.
     "button_targets": [
@@ -78,12 +98,11 @@ def load_profile(path: str | Path | None) -> tuple[dict, Path]:
     """Carga un perfil. Si no existe, devuelve la configuración por defecto
     (se creará al guardar)."""
     p = Path(path) if path else PROFILES_DIR / "general.json"
-    if not p.is_absolute() and not p.exists():
-        cand = PROFILES_DIR / p
-        if cand.exists() or cand.suffix == ".json":
-            p = cand
     if p.suffix != ".json":
         p = p.with_suffix(".json")
+    if not p.is_absolute() and not p.exists():
+        # "nfs_heat" -> perfiles/nfs_heat.json
+        p = PROFILES_DIR / p
     data = {}
     if p.exists():
         with open(p, encoding="utf-8") as f:
@@ -113,6 +132,11 @@ def inherit_hardware(cfg: dict, base: dict) -> None:
                     pc[k] = bp[k]
     if not cfg.get("buttons") and base.get("buttons"):
         cfg["buttons"] = copy.deepcopy(base["buttons"])
+    bsh = base.get("shifter", {})
+    if not cfg["shifter"].get("gears") and bsh.get("gears"):
+        cfg["shifter"]["gears"] = copy.deepcopy(bsh["gears"])
+        if "mode" in bsh:
+            cfg["shifter"]["mode"] = bsh["mode"]
 
 
 def save_profile(cfg: dict, path: Path) -> None:

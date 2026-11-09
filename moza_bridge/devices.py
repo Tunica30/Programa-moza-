@@ -77,39 +77,40 @@ class RealDevice(Device):
         return self.joy.get_hat(i) if i < self.num_hats else (0, 0)
 
 
-class DemoDevice(Device):
-    """Dispositivo simulado para probar el programa sin hardware."""
+DEMO_GUID = "030000006e3400000c00000000000000"
+DEMO_NAME = "MOZA R12 Base (DEMO)"
+DEMO_GEAR_BUTTONS = 20   # botones 20..26 = marchas 1..7
 
-    def __init__(self, kind: str, instance_id: int):
-        self.kind = kind
-        if kind == "base":
-            # Los GUIDs simulados incluyen el VID 346E de MOZA.
-            super().__init__("MOZA R5 Base (DEMO)",
-                             "030000006e3400000500000000000000", 1, 32, 1,
-                             instance_id)
-        else:
-            super().__init__("MOZA SR-P Pedals (DEMO)",
-                             "030000006e3400000300000000000000", 3, 0, 0,
-                             instance_id)
+
+class DemoDevice(Device):
+    """Simula una base MOZA R12 con pedales CRP2, freno de mano y palanca H
+    conectados a la base (todo aparece como un solo dispositivo)."""
+
+    def __init__(self, instance_id: int = 0):
+        super().__init__(DEMO_NAME, DEMO_GUID, 5, 40, 1, instance_id)
         self.t0 = time.monotonic()
 
     def get_axis(self, i: int) -> float:
         t = time.monotonic() - self.t0
-        if self.kind == "base":
-            # Volante oscilando ±200° de 900°.
+        if i == 0:  # volante: ±200° con la base a 900°
             return math.sin(t * 0.6) * (200 / 450)
         cyc = t % 6.0
-        if i == 0:  # acelerador
+        if i == 1:  # acelerador
             p = max(0.0, math.sin(cyc / 3.0 * math.pi)) if cyc < 3 else 0.0
-        elif i == 1:  # freno
+        elif i == 2:  # freno
             p = max(0.0, math.sin((cyc - 3.5) / 2.0 * math.pi)) if cyc > 3.5 else 0.0
+        elif i == 4:  # freno de mano: tirón corto cada 6 s
+            p = max(0.0, math.sin((cyc - 5.0) * math.pi)) if cyc > 5.0 else 0.0
         else:
             p = 0.0
         return p * 2 - 1  # reposo en -1, a fondo en +1
 
     def get_button(self, i: int) -> bool:
         t = time.monotonic() - self.t0
-        return self.kind == "base" and i == int(t) % 8 and (t % 1) < 0.3
+        gear = 1 + int(t / 2.5) % 4
+        if DEMO_GEAR_BUTTONS <= i < DEMO_GEAR_BUTTONS + 7:
+            return i - DEMO_GEAR_BUTTONS + 1 == gear and (t % 2.5) > 0.3  # 0.3 s en punto muerto
+        return i == int(t) % 8 and (t % 1) < 0.3
 
 
 class DeviceManager:
@@ -130,7 +131,7 @@ class DeviceManager:
     def rescan(self) -> None:
         if self.demo:
             if not self.devices:
-                self.devices = [DemoDevice("base", 0), DemoDevice("pedals", 1)]
+                self.devices = [DemoDevice(0)]
         else:
             if not pygame.joystick.get_init():
                 pygame.joystick.init()

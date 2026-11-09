@@ -7,8 +7,9 @@ apretada" como cuando se emula el teclado.
 
 El programa:
 
-- **Detecta solo** la base, los pedales y los botones (también si los pedales
-  van por USB aparte, o si tenés freno de mano / pedales de otra marca).
+- **Detecta solo** la base, los pedales, el freno de mano, la palanca de
+  cambios y los botones (conectados a la base o por USB aparte; pensado para
+  una configuración tipo **R12 V2 + CRP2 + freno de mano + palanca H**).
 - Muestra **en vivo** los grados que giraste el volante, el recorrido real de
   cada pedal y lo que recibe el juego, con un gráfico de los últimos 6 segundos
   para ver la reacción.
@@ -44,8 +45,13 @@ El programa:
 En **Pit House**:
 
 - Desactivá cualquier modo de **emulación de teclado** que estuvieras usando.
-- Anotá la **rotación máxima del volante** (ej. 900°). El programa la estima
-  solo, pero conviene confirmarla.
+- Anotá la **rotación del volante** que tenés configurada (ej. 900°, 1080°).
+  El asistente te la pide (y la estima sola si no la sabés); después la podés
+  cambiar cuando quieras (ver *Rotación* más abajo).
+- **Freno de mano (HBP)**: dejalo en **modo eje/analógico** para que el
+  programa vea cuánto tirás; también funciona en modo botón.
+- **Palanca (HGP)**: en **modo H** el programa la convierte en cambios
+  secuenciales; en **modo secuencial** se asigna como dos botones.
 - Dejá Pit House abierto o cerrado, da igual: el programa lee la base como
   controlador de juego de Windows.
 
@@ -54,15 +60,22 @@ En **Pit House**:
 Doble clic en **`iniciar.bat`**. Si no hay nada calibrado arranca solo el
 asistente (también se abre con la tecla **C**). Te va a pedir:
 
-1. Soltar los pedales y dejar el volante centrado → **ESPACIO**.
+1. Soltar pedales y freno de mano, palanca en **punto muerto**, volante
+   centrado → **ESPACIO**.
 2. Pisar a fondo el **acelerador** → ESPACIO (sin soltarlo).
 3. Pisar a fondo el **freno** → ESPACIO.
 4. Pisar el **embrague** → ESPACIO (o **S** si no tenés).
-5. Girar el volante **90° a la derecha** (la marca superior del aro apuntando
-   a las 3 en punto) → ESPACIO. Con esto detecta el eje, el sentido y estima la
-   rotación de la base.
-6. Apretar el botón del volante que querés para cada acción (freno de mano,
-   nitro, cámara, ...). **S** para saltar.
+5. Tirar del **freno de mano** a fondo → ESPACIO (o **S** si lo usás en modo
+   botón; en ese caso se asigna en el paso 9).
+6. Girar el volante **90° a la derecha** (la marca superior del aro apuntando
+   a las 3 en punto) → ESPACIO. Detecta el eje, el sentido y estima la rotación.
+7. **Rotación**: escribí los grados que tenés en Pit House (ej. `1080`) y
+   ENTER. Si apretás ENTER sin escribir, usa la estimación.
+8. **Palanca H**: poné 1ª → ESPACIO, 2ª → ESPACIO, ... Cuando no tengas más
+   marchas apretá **S**. Si no tenés palanca H (o está en modo secuencial),
+   **S** en la 1ª.
+9. Apretar el botón del volante que querés para cada acción (nitro, cámara,
+   marcha arriba/abajo si la palanca está en modo secuencial, ...). **S** salta.
 
 Se guarda en `perfiles/general.json`. Los perfiles de cada juego **heredan**
 esta detección, así que se hace una sola vez.
@@ -74,22 +87,34 @@ Si algo no se detecta, ejecutá **`diagnostico.bat`**: genera
 
 | Tecla | Acción |
 |---|---|
-| `TAB` / `1`-`4` | Elegir volante, acelerador, freno o embrague |
+| `TAB` / `1`-`6` | Elegir volante, acelerador, freno, embrague, freno de mano o palanca |
 | `↑` `↓` | Elegir parámetro |
 | `←` `→` | Cambiar valor (`Shift` = pasos x5) |
+| `ENTER` | Escribir el valor exacto (ej. `1080` y ENTER; porcentajes: `5` = 5 %) |
+| `M` | Sincronizar la marcha del juego con la palanca |
 | `G` | Guardar perfil |
 | `C` | Volver a detectar periféricos |
 | `R` | Recentrar el volante (dejalo derecho y apretá R) |
 | `P` | Reiniciar el máximo de grados registrado |
 | `ESC` | Salir |
 
+**Rotación**
+
+Hay dos valores, los dos en *Ajustes del volante* (tecla `1`):
+
+- **Rotación de la base (Pit House)**: tiene que ser **igual** a la que tenés
+  en Pit House, si no los grados que se muestran no son reales. Si la cambiás
+  en Pit House, cambiala acá también: seleccionala, apretá `ENTER`, escribí el
+  número (de 90 a 2700) y `ENTER`. También con `←` `→` de a 10° (`Shift` = 50°).
+- **Rotación en el juego**: cuántos grados de volante hacen falta para llegar
+  al tope en el juego (ver abajo). Así podés tener la base a 1080° para otros
+  juegos y que en NFS el tope llegue a los 360°, sin tocar Pit House.
+
 **Volante**
 
 - **Rotación en el juego**: cuántos grados de volante hacen falta para llegar
   al tope en el juego. Menos = dirección más rápida. Para juegos arcade
   (NFS) andan bien 270–450°; para algo más realista 540–900°.
-- **Rotación de la base**: tiene que coincidir con la de Pit House, si no los
-  grados que se muestran no son reales.
 - **Zona muerta central**: ignora movimientos chicos en el centro.
 - **Curva**: 1 = lineal. Mayor a 1 = más suave cerca del centro (más precisión
   en recta); menor a 1 = más agresiva.
@@ -102,7 +127,25 @@ Si algo no se detecta, ejecutá **`diagnostico.bat`**: genera
 - **Saturación**: en qué punto del recorrido ya cuenta como 100 %. Útil en el
   freno con celda de carga (no hace falta pisar con toda la fuerza).
 - **Curva**: mayor a 1 = progresivo (más control al principio del pedal).
-- **Salida al mando**: RT, LT o ninguna.
+- **Salida al mando**: RT, LT, botón o ninguna.
+
+**Freno de mano** (tecla `5`)
+
+Los juegos que se juegan con mando usan el freno de mano como **botón**. El
+programa lee el recorrido analógico y aprieta el botón (A por defecto) cuando
+pasás el **umbral** (la línea blanca sobre la barra). Bajá el umbral si querés
+que entre con un tirón suave.
+
+**Palanca de cambios** (tecla `6`)
+
+NFS Heat y la mayoría de los juegos de mando no soportan palanca H. En modo
+**H → secuencial**, cuando ponés una marcha el programa manda los toques de
+*marcha arriba* / *marcha abajo* necesarios (de 2ª a 5ª = 3 toques). Punto
+muerto y reversa no mandan nada. Si el juego queda desfasado (por ejemplo
+después de un reinicio de carrera), poné en la palanca la marcha que tiene el
+juego y apretá `M`. Para que esto funcione, el juego tiene que estar en
+**transmisión manual**. *Duración del toque*: subila si el juego se saltea
+cambios.
 
 ## 4. Need for Speed Heat
 
@@ -120,9 +163,11 @@ Si algo no se detecta, ejecutá **`diagnostico.bat`**: genera
    figurar un mando de Xbox. Recomendado en el juego:
    - **Zona muerta de dirección**: 0 (la manejás desde MOZA Bridge).
    - **Sensibilidad de dirección**: alta; ajustá la respuesta desde acá.
-4. Los botones del perfil (A = freno de mano, B = nitro, etc.) siguen la
-   asignación por defecto del mando; si en tu versión del juego son otros,
-   cambialos en *Opciones → Controles* o volvé a detectar con `C`.
+4. En el juego elegí **transmisión manual** si vas a usar la palanca H.
+5. Los botones del perfil (A = freno de mano, B = nitro, RB/LB = marcha
+   arriba/abajo, etc.) siguen la asignación por defecto del mando; si en tu
+   versión del juego son otros, cambialos en *Opciones → Controles* del juego
+   o en los ajustes del freno de mano / palanca del programa.
 
 Con este perfil también podés jugar cualquier otro juego que acepte mando de
 Xbox. Para crear un perfil nuevo copiá `perfiles/nfs_heat.json` con otro

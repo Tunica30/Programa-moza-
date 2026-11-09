@@ -90,47 +90,109 @@ class FakeMgr:
 
 
 def test_calibration_detects_everything():
-    base = FakeDev("MOZA R9", "base", [0.0], buttons=10)
-    ped = FakeDev("MOZA SR-P", "ped", [-1.0, 1.0, -1.0])  # freno reposa en +1
-    mgr = FakeMgr([base, ped])
+    # Todo conectado a la base, como R12 + CRP2 + HBP + HGP.
+    base = FakeDev("MOZA R12", "base", [0.0, -1.0, 1.0, -1.0, -1.0], buttons=40)
+    mgr = FakeMgr([base])
     cfg = copy.deepcopy(DEFAULT_CONFIG)
-    cfg["button_targets"] = cfg["button_targets"][:2]
+    cfg["button_targets"] = cfg["button_targets"][:2]   # freno de mano (A), nitro (B)
     cal = Calibrator(cfg, mgr)
 
-    cal.confirm()                     # reposo
-    ped.axes[0] = 1.0; cal.confirm()  # acelerador
-    ped.axes[0] = -1.0
-    ped.axes[1] = -1.0; cal.confirm()  # freno (eje invertido)
-    ped.axes[1] = 1.0
-    cal.skip()                        # sin embrague
-    base.axes[0] = 0.25; cal.confirm()  # 90° con base a 720°
-    base.buttons[3] = True; cal.poll_buttons()
-    base.buttons[3] = False; cal.poll_buttons()
-    base.buttons[3] = True; cal.poll_buttons()  # repetido -> error
+    cal.confirm()                               # reposo
+    base.axes[1] = 1.0; cal.confirm()           # acelerador
+    base.axes[1] = -1.0
+    base.axes[2] = -1.0; cal.confirm()          # freno (eje invertido)
+    base.axes[2] = 1.0
+    cal.skip()                                  # sin embrague
+    base.axes[4] = 1.0; cal.confirm()           # freno de mano analógico
+    base.axes[4] = -1.0
+    base.axes[0] = 90 / 540; cal.confirm()      # 90° con base a 1080°
+    assert cal.estimated_rotation == 1080
+    for ch in "9x99":                           # letras se ignoran
+        cal.type_char(ch)
+    cal.backspace()
+    cal.type_char("0")
+    cal.confirm()                               # 990 tipeado
+    cal.confirm()                               # marcha 1 sin botón -> error
     assert cal.error
-    base.buttons[3] = False; cal.poll_buttons()
-    base.buttons[7] = True; cal.poll_buttons()
+    for g, btn in ((1, 20), (2, 21), (3, 22)):
+        base.buttons[btn] = True
+        cal.confirm()
+        base.buttons[btn] = False
+    cal.skip()                                  # no hay más marchas
+    # "Freno de mano" como botón se salta: ya lo maneja el eje.
+    assert cal.step == ("button", "Nitro", "B")
+    base.buttons[20] = True; cal.poll_buttons()  # marcha: no se asigna
+    assert not cal.done
+    base.buttons[20] = False; cal.poll_buttons()
+    base.buttons[3] = True; cal.poll_buttons()
     assert cal.done
 
     res = cal.result()
-    assert res["pedals"]["throttle"]["axis"]["index"] == 0
-    assert res["pedals"]["brake"]["axis"]["index"] == 1
+    assert res["pedals"]["throttle"]["axis"]["index"] == 1
+    assert res["pedals"]["brake"]["axis"]["index"] == 2
     assert res["pedals"]["brake"]["rest"] == 1.0
     assert res["pedals"]["brake"]["full"] == -1.0
     assert res["pedals"]["clutch"]["axis"] is None
-    assert res["steering"]["axis"]["device"] == "base"
-    assert res["steering"]["hardware_rotation_deg"] == 720
-    assert [(b["index"], b["xbox"]) for b in res["buttons"]] == [(3, "A"), (7, "B")]
+    assert res["pedals"]["handbrake"]["axis"]["index"] == 4
+    assert res["steering"]["axis"]["index"] == 0
+    assert res["steering"]["hardware_rotation_deg"] == 990
+    assert res["shifter"]["mode"] == "h_secuencial"
+    assert [(g["index"], g["gear"]) for g in res["shifter"]["gears"]] == [(20, 1), (21, 2), (22, 3)]
+    assert [(b["index"], b["xbox"]) for b in res["buttons"]] == [(3, "B")]
 
     # Con la configuración detectada, el motor genera la salida correcta.
-    ped.axes[0] = 0.0
-    ped.axes[1] = 0.0
+    base.axes[1] = 0.0
+    base.axes[2] = 0.0
+    base.axes[4] = 0.0          # freno de mano a mitad -> pasa el umbral
+    base.axes[0] = 90 / 495     # 90° con 990°
     base.buttons[3] = True
     st = Engine(res, mgr, NullOutput()).tick()
     assert 0.4 < st.right_trigger < 0.6
     assert 0.4 < st.left_trigger < 0.6
     assert st.steering_deg == pytest.approx(90)
-    assert "A" in st.xbox_buttons
+    assert {"A", "B"} <= st.xbox_buttons
+
+
+def test_rotation_out_of_range_rejected():
+    base = FakeDev("MOZA R12", "base", [0.0], buttons=0)
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["pedals"] = {}
+    cal = Calibrator(cfg, FakeMgr([base]))
+    cal.confirm()
+    base.axes[0] = 0.2
+    cal.confirm()
+    for ch in "5000":
+        cal.type_char(ch)
+    cal.confirm()
+    assert cal.error and cal.step == ("rotation",)
+
+
+def test_h_shifter_emulation_sends_sequential_pulses():
+    from moza_bridge.engine import ShifterEmulator
+    cfg = {"mode": "h_secuencial", "gears": [{}], "up_button": "RB",
+           "down_button": "LB", "pulse_ms": 50}
+    sh = ShifterEmulator()
+    t = 0.0
+    assert sh.update(1, cfg, t) is None and sh.game_gear == 1
+
+    def run(gear, seconds):
+        nonlocal t
+        presses, prev = [], None
+        end = t + seconds
+        while t < end:
+            b = sh.update(gear, cfg, t)
+            if b and b != prev:
+                presses.append(b)
+            prev = b
+            t += 0.004
+        return presses
+
+    assert run(4, 1.0) == ["RB", "RB", "RB"]      # 1ª -> 4ª
+    assert sh.game_gear == 4
+    assert run(0, 0.3) == []                       # punto muerto: nada
+    assert run(2, 1.0) == ["LB", "LB"]             # 4ª -> 2ª
+    sh.resync(5)
+    assert run(5, 0.3) == []
 
 
 def test_game_profile_inherits_hardware_calibration():
@@ -149,3 +211,10 @@ def test_game_profile_inherits_hardware_calibration():
     assert cfg["pedals"]["brake"]["rest"] == 1.0
     assert cfg["pedals"]["throttle"]["axis"] is None
     assert cfg["buttons"][0]["xbox"] == "A"
+
+
+def test_load_profile_by_name():
+    from moza_bridge.config import load_profile
+    cfg, path = load_profile("nfs_heat")
+    assert path.name == "nfs_heat.json" and path.parent.name == "perfiles"
+    assert cfg["profile_name"] == "Need for Speed Heat"

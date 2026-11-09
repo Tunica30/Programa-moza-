@@ -12,7 +12,8 @@ from collections import deque
 import pygame
 
 from .calibrate import Calibrator
-from .config import PEDAL_OUTPUTS, save_profile
+from .config import (MAX_ROTATION_DEG, MIN_ROTATION_DEG, PEDAL_OUTPUTS,
+                     SHIFTER_MODES, XBOX_BUTTONS, save_profile)
 from .devices import DeviceManager
 from .engine import Engine
 from .processing import pedal_curve_point, steering_curve_point
@@ -27,14 +28,18 @@ GREEN = (70, 200, 120)
 RED = (235, 75, 75)
 BLUE = (80, 160, 255)
 YELLOW = (240, 200, 60)
-PEDAL_COLORS = {"throttle": GREEN, "brake": RED, "clutch": BLUE}
+PURPLE = (190, 120, 255)
+PEDAL_COLORS = {"throttle": GREEN, "brake": RED, "clutch": BLUE, "handbrake": PURPLE}
 
 HISTORY_SECONDS = 6.0
 
 # Parámetros ajustables: (clave, etiqueta, paso, mínimo, máximo, formato)
+# ENTER sobre un parámetro numérico permite escribir el valor exacto.
 STEER_PARAMS = [
-    ("game_rotation_deg", "Rotación en el juego (°)", 10, 90, 2520, "{:.0f}°"),
-    ("hardware_rotation_deg", "Rotación de la base (Pit House)", 10, 90, 2520, "{:.0f}°"),
+    ("hardware_rotation_deg", "Rotación de la base (Pit House)", 10,
+     MIN_ROTATION_DEG, MAX_ROTATION_DEG, "{:.0f}°"),
+    ("game_rotation_deg", "Rotación en el juego (°)", 10,
+     MIN_ROTATION_DEG, MAX_ROTATION_DEG, "{:.0f}°"),
     ("deadzone", "Zona muerta central", 0.01, 0.0, 0.5, "{:.0%}"),
     ("gamma", "Curva (1 = lineal)", 0.05, 0.3, 3.0, "{:.2f}"),
     ("anti_deadzone", "Anti zona muerta del juego", 0.01, 0.0, 0.5, "{:.0%}"),
@@ -45,8 +50,21 @@ PEDAL_PARAMS = [
     ("saturation", "Saturación (100% en)", 0.01, 0.3, 1.0, "{:.0%}"),
     ("gamma", "Curva (1 = lineal)", 0.05, 0.3, 3.0, "{:.2f}"),
     ("output", "Salida al mando", None, None, None, "{}"),
+    ("button", "Botón (si salida = botón)", None, None, None, "{}"),
+    ("threshold", "Umbral del botón", 0.01, 0.05, 0.95, "{:.0%}"),
 ]
-OUTPUT_NAMES = {"right_trigger": "Gatillo RT", "left_trigger": "Gatillo LT", "none": "Ninguna"}
+SHIFTER_PARAMS = [
+    ("mode", "Modo de la palanca H", None, None, None, "{}"),
+    ("up_button", "Marcha arriba -> botón", None, None, None, "{}"),
+    ("down_button", "Marcha abajo -> botón", None, None, None, "{}"),
+    ("pulse_ms", "Duración del toque (ms)", 10, 20, 300, "{:.0f} ms"),
+]
+OUTPUT_NAMES = {"right_trigger": "Gatillo RT", "left_trigger": "Gatillo LT",
+                "button": "Botón", "none": "Ninguna"}
+MODE_NAMES = {"h_secuencial": "H -> secuencial", "none": "Apagada"}
+CYCLE_OPTIONS = {"output": PEDAL_OUTPUTS, "mode": SHIFTER_MODES,
+                 "button": XBOX_BUTTONS, "up_button": XBOX_BUTTONS,
+                 "down_button": XBOX_BUTTONS}
 
 
 class App:
@@ -64,9 +82,10 @@ class App:
         self.devices = devices
         self.output = output
         self.engine = Engine(cfg, devices, output)
-        self.controls = ["steering"] + list(cfg["pedals"].keys())
+        self.controls = ["steering"] + list(cfg["pedals"].keys()) + ["shifter"]
         self.sel_control = 0
         self.sel_param = 0
+        self.editing: str | None = None   # texto tipeado al editar un valor
         self.dirty = False
         self.toast = ("", 0.0)
         self.calib: Calibrator | None = None
@@ -94,15 +113,25 @@ class App:
     def notify(self, msg):
         self.toast = (msg, time.monotonic() + 3.0)
 
+    def control_label(self, c):
+        if c == "steering":
+            return "Volante"
+        if c == "shifter":
+            return "Palanca"
+        return self.cfg["pedals"][c].get("label", c)
+
     def current_cfg(self):
         c = self.controls[self.sel_control]
         if c == "steering":
             return self.cfg["steering"], STEER_PARAMS
+        if c == "shifter":
+            return self.cfg["shifter"], SHIFTER_PARAMS
         return self.cfg["pedals"][c], PEDAL_PARAMS
 
     # -------------------------------------------------------- calibración --
     def start_calibration(self):
         self.devices.rescan()
+        self.editing = None
         self.calib = Calibrator(self.cfg, self.devices)
 
     def finish_calibration(self):
@@ -110,6 +139,7 @@ class App:
         self.cfg.clear()
         self.cfg.update(new)
         self.engine.cfg = self.cfg
+        self.engine.shifter.resync(self.engine.current_h_gear())
         self.calib = None
         save_profile(self.cfg, self.path)
         self.dirty = False
@@ -121,19 +151,43 @@ class App:
         key, _, step, lo, hi, _ = params[self.sel_param]
         if key == "invert":
             c[key] = not c.get(key, False)
-        elif key == "output":
-            i = PEDAL_OUTPUTS.index(c.get("output", "none"))
-            c[key] = PEDAL_OUTPUTS[(i + direction) % len(PEDAL_OUTPUTS)]
+        elif key in CYCLE_OPTIONS:
+            opts = CYCLE_OPTIONS[key]
+            cur = c.get(key, opts[0])
+            i = opts.index(cur) if cur in opts else 0
+            c[key] = opts[(i + direction) % len(opts)]
         else:
             v = c.get(key, 0) + direction * step * (5 if big else 1)
             c[key] = round(min(hi, max(lo, v)), 4)
         self.dirty = True
 
+    def commit_edit(self):
+        """Aplica el valor tipeado (los porcentajes se escriben como 5 = 5 %)."""
+        c, params = self.current_cfg()
+        key, label, _step, lo, hi, fmt = params[self.sel_param]
+        txt, self.editing = self.editing, None
+        try:
+            v = float(txt.replace(",", "."))
+        except (ValueError, AttributeError):
+            return
+        if "%" in fmt:
+            v /= 100.0
+        if not lo <= v <= hi:
+            shown = (f"{lo:.0%} y {hi:.0%}" if "%" in fmt else f"{lo:g} y {hi:g}")
+            self.notify(f"{label}: tiene que estar entre {shown}")
+            return
+        c[key] = int(round(v)) if "{:.0f}" in fmt else round(v, 4)
+        self.dirty = True
+
     def on_key(self, ev) -> bool:
         k = ev.key
         if self.calib:
-            if k == pygame.K_SPACE:
+            if k in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER):
                 self.calib.confirm()
+            elif k == pygame.K_BACKSPACE:
+                self.calib.backspace()
+            elif self.calib.wants_text and ev.unicode.isdigit():
+                self.calib.type_char(ev.unicode)
             elif k == pygame.K_s:
                 self.calib.skip()
             elif k == pygame.K_ESCAPE:
@@ -141,6 +195,16 @@ class App:
                 self.notify("Detección cancelada")
             if self.calib and self.calib.done:
                 self.finish_calibration()
+            return True
+        if self.editing is not None:
+            if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.commit_edit()
+            elif k == pygame.K_ESCAPE:
+                self.editing = None
+            elif k == pygame.K_BACKSPACE:
+                self.editing = self.editing[:-1]
+            elif ev.unicode and ev.unicode in "0123456789.," and len(self.editing) < 6:
+                self.editing += ev.unicode
             return True
         if k == pygame.K_ESCAPE:
             return False
@@ -156,6 +220,10 @@ class App:
             self.sel_param = (self.sel_param + (1 if k == pygame.K_DOWN else -1)) % n
         elif k in (pygame.K_LEFT, pygame.K_RIGHT):
             self.adjust(1 if k == pygame.K_RIGHT else -1, shift)
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            _c, params = self.current_cfg()
+            if params[self.sel_param][2] is not None:   # parámetro numérico
+                self.editing = ""
         elif k == pygame.K_g:
             save_profile(self.cfg, self.path)
             self.dirty = False
@@ -169,6 +237,9 @@ class App:
                 sc["center"] = round(st.steering_raw, 4)
                 self.dirty = True
                 self.notify("Centro del volante reajustado")
+        elif k == pygame.K_m:
+            self.engine.shifter.resync(self.engine.current_h_gear())
+            self.notify("Marcha del juego sincronizada con la palanca")
         elif k == pygame.K_p:
             self.peak_deg = 0.0
         return True
@@ -227,51 +298,110 @@ class App:
         pygame.draw.line(self.screen, TEXT, (mid, by - 3), (mid, by + 19), 2)
         self.text(f"Salida al juego: {st.steering_out * 100:+.0f}%", (cx, by - 14), TEXT,
                   self.f_small, center=True)
+        self.text(f"Base: {sc['hardware_rotation_deg']:.0f}°  (cambiala en Ajustes del volante)",
+                  (cx, by + 28), MUTED, self.f_small, center=True)
 
     def draw_pedals(self, st):
         rect = (410, 80, 360, 330)
-        self.panel(rect, "Pedales")
+        self.panel(rect, "Pedales y freno de mano  [2-5]")
         keys = list(self.cfg["pedals"].keys())
         colw = 340 // max(len(keys), 1)
+        short = {"handbrake": "F. de mano"}
         for n, key in enumerate(keys):
             pc = self.cfg["pedals"][key]
             ps = st.pedals.get(key)
-            x = 425 + n * colw
+            x = 420 + n * colw
+            cx = x + colw / 2
             col = PEDAL_COLORS.get(key, YELLOW)
-            self.text(f"{pc.get('label', key)} [{n + 2}]", (x + colw / 2 - 10, 112), TEXT, self.f_small,
-                      center=True)
-            top, height, bw = 130, 230, 34
-            bx1 = x + colw / 2 - 10 - bw - 4
-            bx2 = x + colw / 2 - 10 + 4
+            self.text(short.get(key, pc.get("label", key)), (cx, 120), TEXT, self.f_small, center=True)
+            top, height, bw = 135, 225, 28 if len(keys) > 3 else 34
+            bx1 = cx - bw - 3
+            bx2 = cx + 3
             for bx in (bx1, bx2):
                 pygame.draw.rect(self.screen, (50, 54, 66), (bx, top, bw, height), border_radius=5)
             if not ps or not ps.connected:
-                self.text("-", (x + colw / 2 - 10, top + height / 2), MUTED, self.f, center=True)
+                self.text("-", (cx, top + height / 2), MUTED, self.f, center=True)
                 continue
             # zona muerta / saturación como marcas
-            for frac, c in ((pc["deadzone"], MUTED), (pc["saturation"], MUTED)):
+            for frac in (pc["deadzone"], pc["saturation"]):
                 yy = top + height - frac * height
-                pygame.draw.line(self.screen, c, (bx1 - 3, yy), (bx1 + bw + 3, yy), 1)
+                pygame.draw.line(self.screen, MUTED, (bx1 - 3, yy), (bx1 + bw + 3, yy), 1)
             hpos = ps.position * height
             pygame.draw.rect(self.screen, (150, 155, 170),
                              (bx1, top + height - hpos, bw, hpos), border_radius=5)
             hout = ps.output * height
             pygame.draw.rect(self.screen, col, (bx2, top + height - hout, bw, hout), border_radius=5)
-            self.text(f"{ps.position * 100:.0f}%", (bx1 + bw / 2, top + height + 14), MUTED,
+            self.text(f"{ps.position * 100:.0f}%", (bx1 + bw / 2, top + height + 12), MUTED,
                       self.f_small, center=True)
-            self.text(f"{ps.output * 100:.0f}%", (bx2 + bw / 2, top + height + 14), col,
-                      self.f_small, center=True)
+            if pc.get("output") == "button":
+                yy = top + height - pc.get("threshold", 0.5) * height
+                pygame.draw.line(self.screen, TEXT, (bx2 - 3, yy), (bx2 + bw + 3, yy), 2)
+                on = pc.get("button", "A") in st.xbox_buttons
+                self.text(pc.get("button", "A"), (bx2 + bw / 2, top + height + 12),
+                          col if on else MUTED, self.f_small, center=True)
+            else:
+                self.text(f"{ps.output * 100:.0f}%", (bx2 + bw / 2, top + height + 12), col,
+                          self.f_small, center=True)
         self.text("gris = recorrido real   color = lo que recibe el juego",
-                  (590, 398), MUTED, self.f_small, center=True)
+                  (590, 395), MUTED, self.f_small, center=True)
+
+    def draw_shifter_info(self, st):
+        sh = self.cfg["shifter"]
+        gx, gy = 800, 118
+        if not sh.get("gears"):
+            self.text("Palanca H no detectada.", (gx, gy), MUTED)
+            self.text("Presioná C para detectarla. Si la usás en modo", (gx, gy + 30), MUTED, self.f_small)
+            self.text("secuencial, asignale Marcha arriba/abajo (RB/LB).", (gx, gy + 50), MUTED,
+                      self.f_small)
+            return
+        g = st.shifter_gear
+        self.text("Palanca", (gx + 50, gy + 4), MUTED, self.f_small, center=True)
+        self.text(f"{g}ª" if g else "N", (gx + 50, gy + 50), ACCENT, self.f_big, center=True)
+        self.text("Juego", (gx + 170, gy + 4), MUTED, self.f_small, center=True)
+        gg = st.game_gear
+        self.text(f"{gg}ª" if gg else "-", (gx + 170, gy + 50), TEXT, self.f_big, center=True)
+        self.text(f"{len(sh['gears'])} marchas", (gx + 250, gy + 44), MUTED, self.f_small)
+        lines = ["Al cambiar de marcha se mandan toques de",
+                 f"{sh.get('up_button')} / {sh.get('down_button')} hasta llegar a la marcha puesta.",
+                 "Si el juego se desfasa: poné la marcha que",
+                 "tiene el juego y apretá M para sincronizar."]
+        for i, line in enumerate(lines):
+            self.text(line, (gx, gy + 80 + i * 18), MUTED, self.f_small)
 
     def draw_curve_and_params(self, st):
         rect = (780, 80, 380, 330)
         c = self.controls[self.sel_control]
         cfg, params = self.current_cfg()
-        label = "Volante" if c == "steering" else cfg.get("label", c)
-        self.panel(rect, f"Ajustes: {label}   (TAB cambia)")
-        # Gráfico de curva
-        gx, gy, gs = 800, 115, 130
+        self.panel(rect, f"Ajustes: {self.control_label(c)}  [{self.sel_control + 1}]  (TAB cambia)")
+        if c == "shifter":
+            self.draw_shifter_info(st)
+        else:
+            self.draw_curve(st, c, cfg)
+        # Lista de parámetros
+        y = 410 - 10 - len(params) * 22
+        for i, (key, lab, *_rest, fmt) in enumerate(params):
+            v = cfg.get(key)
+            if key == "output":
+                v = OUTPUT_NAMES.get(v, v)
+            elif key == "mode":
+                v = MODE_NAMES.get(v, v)
+            elif key == "invert":
+                v = "Sí" if v else "No"
+            sel = i == self.sel_param
+            if sel:
+                pygame.draw.rect(self.screen, (55, 60, 76), (790, y - 3, 360, 22), border_radius=4)
+            self.text(lab, (800, y), TEXT if sel else MUTED, self.f_small)
+            if sel and self.editing is not None:
+                val = f"[ {self.editing}_ ]  ENTER"
+                color = YELLOW
+            else:
+                val = ("< " if sel else "") + fmt.format(v) + (" >" if sel else "")
+                color = ACCENT if sel else TEXT
+            self.text(val, (1140 - self.f_small.size(val)[0], y), color, self.f_small)
+            y += 22
+
+    def draw_curve(self, st, c, cfg):
+        gx, gy, gs = 800, 115, 120
         pygame.draw.rect(self.screen, (40, 44, 56), (gx, gy, gs, gs))
         pygame.draw.line(self.screen, (60, 64, 78), (gx, gy + gs), (gx + gs, gy), 1)
         pts = []
@@ -291,29 +421,13 @@ class App:
             x = y = None
         if x is not None:
             pygame.draw.circle(self.screen, TEXT, (gx + x * gs, gy + gs - y * gs), 5)
-        self.text("entrada", (gx, gy + gs + 4), MUTED, self.f_small)
+        self.text("entrada", (gx, gy + gs + 2), MUTED, self.f_small)
         self.text("salida", (gx + gs + 6, gy), MUTED, self.f_small)
         tip = ("Curva >1: más suave" if c != "steering"
                else "Curva >1: más precisa")
         self.text(tip, (gx + gs + 6, gy + 22), MUTED, self.f_small)
         self.text("Curva <1: más agresiva", (gx + gs + 6, gy + 40), MUTED, self.f_small)
-        # Lista de parámetros
-        y = 270
-        for i, (key, lab, *_rest, fmt) in enumerate(params):
-            v = cfg.get(key)
-            if key == "output":
-                v = OUTPUT_NAMES.get(v, v)
-            elif key == "invert":
-                v = "Sí" if v else "No"
-            sel = i == self.sel_param
-            if sel:
-                pygame.draw.rect(self.screen, (55, 60, 76), (790, y - 3, 360, 22), border_radius=4)
-            self.text(lab, (800, y), TEXT if sel else MUTED, self.f_small)
-            self.text(("< " if sel else "") + fmt.format(v) + (" >" if sel else ""),
-                      (1140 - self.f_small.size(("< " if sel else "") + fmt.format(v)
-                                                + (" >" if sel else ""))[0], y),
-                      ACCENT if sel else TEXT, self.f_small)
-            y += 22
+        self.text("ENTER: escribir valor", (gx + gs + 6, gy + 70), MUTED, self.f_small)
 
     def draw_history(self, st):
         rect = (20, 420, 1140, 200)
@@ -347,15 +461,21 @@ class App:
     def draw_footer(self, st):
         btns = ", ".join(f"{i}" for _, i in st.raw_buttons) or "ninguno"
         xb = ", ".join(sorted(st.xbox_buttons)) or "-"
+        gear = ""
+        if self.cfg["shifter"].get("gears"):
+            g = st.shifter_gear
+            gear = f"    Palanca: {f'{g}ª' if g else 'N'}  (juego {st.game_gear or '-'}ª)"
         self.text(f"Botones apretados: {btns}    ->  Xbox: {xb}    "
-                  f"LT {st.left_trigger * 100:.0f}%  RT {st.right_trigger * 100:.0f}%",
+                  f"LT {st.left_trigger * 100:.0f}%  RT {st.right_trigger * 100:.0f}%" + gear,
                   (20, 630), TEXT, self.f_small)
-        self.text("TAB/1-4: control   Arriba/Abajo: parámetro   Izq/Der: ajustar (Shift x5)   "
-                  "G: guardar   C: detectar periféricos   R: recentrar volante   ESC: salir",
-                  (20, 660), MUTED, self.f_small)
+        self.text(f"TAB/1-{len(self.controls)}: control   Arriba/Abajo: parámetro   "
+                  "Izq/Der: ajustar (Shift x5)   ENTER: escribir valor   G: guardar",
+                  (20, 652), MUTED, self.f_small)
+        self.text("C: detectar periféricos   R: recentrar volante   M: sincronizar marcha   "
+                  "P: reiniciar máximo   ESC: salir", (20, 672), MUTED, self.f_small)
         msg, until = self.toast
         if msg and time.monotonic() < until:
-            self.text(msg, (20, 690), YELLOW, self.f_small)
+            self.text(msg, (20, 696), YELLOW, self.f_small)
 
     def draw_calibration(self):
         overlay = pygame.Surface((W, H), pygame.SRCALPHA)
