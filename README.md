@@ -31,7 +31,7 @@ El programa:
 1. Instalá **Python 3.10 o superior** desde <https://www.python.org/downloads/>.
    En el instalador tildá **"Add python.exe to PATH"**.
 2. Descargá este proyecto (botón verde *Code → Download ZIP*) y descomprimilo.
-3. Hacé doble clic en **`instalar.bat`**. Instala `pygame` y `vgamepad`.
+3. Hacé doble clic en **`instalar.bat`**. Instala `pygame-ce` y `vgamepad`.
    La primera vez `vgamepad` abre el instalador del driver **ViGEmBus**
    (el que crea el mando virtual): aceptalo y reiniciá si lo pide.
    Si no se abre, instalalo a mano desde
@@ -197,7 +197,7 @@ python -m moza_bridge --demo              # probar la interfaz sin volante
 ## Para desarrolladores
 
 ```
-pip install pygame pytest
+pip install pygame-ce pytest
 python -m pytest
 ```
 

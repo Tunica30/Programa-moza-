@@ -1,2 +1,3 @@
-pygame>=2.5
+# pygame-ce: versión mantenida de pygame (mismo código, soporta Python nuevos)
+pygame-ce>=2.5.8
 vgamepad>=0.1.0; sys_platform == "win32"
