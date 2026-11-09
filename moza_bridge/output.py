@@ -86,7 +86,8 @@ def create_output(enabled: bool):
     if vg is None:
         if sys.platform != "win32":
             return NullOutput("Sin mando virtual: sólo funciona en Windows")
-        return NullOutput("Falta vgamepad/ViGEmBus: ver README (pip install vgamepad)")
+        print(f"No se pudo cargar vgamepad: {_IMPORT_ERROR!r}")
+        return NullOutput("Falta vgamepad o el driver ViGEmBus: ver README")
     try:
         return XboxOutput()
     except Exception as exc:  # pragma: no cover - depende del driver
