@@ -213,8 +213,36 @@ def test_game_profile_inherits_hardware_calibration():
     assert cfg["buttons"][0]["xbox"] == "A"
 
 
-def test_load_profile_by_name():
-    from moza_bridge.config import load_profile
+def test_load_profile_by_name(tmp_path, monkeypatch):
+    from moza_bridge.config import load_profile, save_profile
+    monkeypatch.setenv("MOZA_BRIDGE_HOME", str(tmp_path))
     cfg, path = load_profile("nfs_heat")
-    assert path.name == "nfs_heat.json" and path.parent.name == "perfiles"
-    assert cfg["profile_name"] == "Need for Speed Heat"
+    assert cfg["profile_name"] == "Need for Speed Heat"   # el que trae el programa
+    assert path == tmp_path / "perfiles" / "nfs_heat.json"  # se guarda en tu carpeta
+    # La detección guardada en "general" la heredan los perfiles de juego.
+    gen, gpath = load_profile("general")
+    gen["steering"]["axis"] = {"device": "g", "name": "MOZA R12 Base", "index": 0}
+    gen["steering"]["hardware_rotation_deg"] = 1080
+    save_profile(gen, gpath)
+    cfg, _ = load_profile("nfs_heat")
+    assert cfg["steering"]["axis"]["name"] == "MOZA R12 Base"
+    assert cfg["steering"]["hardware_rotation_deg"] == 1080
+    assert cfg["steering"]["game_rotation_deg"] == 360
+    cfg["steering"]["gamma"] = 1.5
+    save_profile(cfg, path)
+    assert load_profile("nfs_heat")[0]["steering"]["gamma"] == 1.5
+
+
+def test_detection_is_shared_with_general(tmp_path, monkeypatch):
+    from moza_bridge.config import load_profile, share_hardware
+    monkeypatch.setenv("MOZA_BRIDGE_HOME", str(tmp_path))
+    cfg, _ = load_profile("nfs_heat")
+    cfg["steering"]["axis"] = {"device": "g", "name": "MOZA R12 Base", "index": 0}
+    cfg["steering"]["hardware_rotation_deg"] = 1080
+    cfg["shifter"]["gears"] = [{"device": "g", "name": "x", "index": 20, "gear": 1}]
+    cfg["shifter"]["mode"] = "h_secuencial"
+    share_hardware(cfg)
+    gen, _ = load_profile("general")
+    assert gen["steering"]["hardware_rotation_deg"] == 1080
+    assert gen["steering"]["game_rotation_deg"] == 540   # sensibilidad propia intacta
+    assert gen["shifter"]["mode"] == "h_secuencial"

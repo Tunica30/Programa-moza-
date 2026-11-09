@@ -43,6 +43,7 @@ def main(argv=None) -> int:
         mgr = DeviceManager(cfg, demo=args.demo)
         time.sleep(0.3)
         pygame.event.pump()
+        print(f"Python: {sys.executable}")
         print("=== Periféricos detectados ===")
         print(describe_devices(mgr))
         print("\nCopiá este texto y compartilo si algo no se detecta bien.")
@@ -59,7 +60,11 @@ def main(argv=None) -> int:
     mgr = DeviceManager(cfg, demo=args.demo)
     out = create_output(cfg["output"].get("enabled", True) and not args.sin_salida)
     print(f"Perfil: {path}")
+    print(f"Python (para autorizar en HidHide): {sys.executable}")
     print(out.status)
+    if not any(d.is_moza for d in mgr.devices):
+        print("ATENCION: no se ve ningun dispositivo MOZA. Si HidHide esta activo,")
+        print("agrega la ruta de Python de arriba en HidHide > Applications.")
     App(cfg, path, mgr, out).run()
     return 0
 

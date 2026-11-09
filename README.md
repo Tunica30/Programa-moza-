@@ -77,8 +77,9 @@ asistente (también se abre con la tecla **C**). Te va a pedir:
 9. Apretar el botón del volante que querés para cada acción (nitro, cámara,
    marcha arriba/abajo si la palanca está en modo secuencial, ...). **S** salta.
 
-Se guarda en `perfiles/general.json`. Los perfiles de cada juego **heredan**
-esta detección, así que se hace una sola vez.
+Se guarda en tu carpeta de usuario (`%APPDATA%\MozaBridge\perfiles`), así
+no se pierde si bajás una versión nueva del programa. Los perfiles de cada
+juego **comparten** esta detección, así que se hace una sola vez.
 
 Si algo no se detecta, ejecutá **`diagnostico.bat`**: genera
 `diagnostico.txt` con la lista de periféricos, sus IDs (VID/PID) y ejes.
@@ -153,8 +154,10 @@ cambios.
    poco progresivo). Ajustalo mirando el gráfico y apretá `G` para guardar.
 2. En **HidHide** (*HidHide Configuration Client*):
    - Pestaña *Applications*: es la lista de programas **autorizados** a ver
-     los dispositivos ocultos. Agregá `python.exe` (para saber dónde está,
-     ejecutá `where python` en una consola) y el `.exe` de **Pit House**.
+     los dispositivos ocultos. Agregá el `python.exe` que muestra la ventana
+     negra al abrir MOZA Bridge (línea *"Python (para autorizar en HidHide)"*)
+     y el `.exe` de **Pit House**. Si no lo agregás, el programa tampoco ve el
+     volante y avisa en rojo "No se ve ningún MOZA".
    - Pestaña *Devices*: tildá la base y los pedales MOZA y activá
      *Enable device hiding*.
    - Así el juego sólo ve el mando virtual. Para volver a usar el volante

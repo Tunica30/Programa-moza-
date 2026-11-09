@@ -13,7 +13,7 @@ import pygame
 
 from .calibrate import Calibrator
 from .config import (MAX_ROTATION_DEG, MIN_ROTATION_DEG, PEDAL_OUTPUTS,
-                     SHIFTER_MODES, XBOX_BUTTONS, save_profile)
+                     SHIFTER_MODES, XBOX_BUTTONS, save_profile, share_hardware)
 from .devices import DeviceManager
 from .engine import Engine
 from .processing import pedal_curve_point, steering_curve_point
@@ -91,7 +91,8 @@ class App:
         self.calib: Calibrator | None = None
         self.history: deque = deque()
         self.peak_deg = 0.0
-        if cfg["steering"].get("axis") is None and devices.devices and not devices.demo:
+        if (cfg["steering"].get("axis") is None and not devices.demo
+                and any(d.is_moza for d in devices.devices)):
             self.start_calibration()
 
     # ------------------------------------------------------------ helpers --
@@ -142,8 +143,10 @@ class App:
         self.engine.shifter.resync(self.engine.current_h_gear())
         self.calib = None
         save_profile(self.cfg, self.path)
+        if self.path.name != "general.json":
+            share_hardware(self.cfg)
         self.dirty = False
-        self.notify(f"Detección completa. Guardado en {self.path.name}")
+        self.notify("Detección completa y guardada (sirve para todos los perfiles)")
 
     # ------------------------------------------------------------ teclado --
     def adjust(self, direction, big=False):
@@ -255,9 +258,15 @@ class App:
         if not self.devices.devices:
             self.text("No se detectan periféricos. Conectá la base/pedales.", (20, y), RED)
             return
+        if not any(d.is_moza for d in self.devices.devices):
+            self.text("No se ve ningún MOZA. Si usás HidHide, agregá python.exe a sus Applications "
+                      "(la ruta está en la ventana negra).", (20, y), RED, self.f_small)
+            return
         x = 20
         for d in self.devices.devices:
-            s = f"{'[MOZA] ' if d.is_moza else ''}{d.name}  ({d.num_axes} ejes, {d.num_buttons} bot.)"
+            virtual = (not d.is_moza and "xbox 360" in d.name.lower() and self.output.active)
+            extra = " - mando virtual" if virtual else ""
+            s = f"{'[MOZA] ' if d.is_moza else ''}{d.name}{extra}  ({d.num_axes} ejes, {d.num_buttons} bot.)"
             r = self.text(s, (x, y), ACCENT if d.is_moza else MUTED, self.f_small)
             x = r.right + 24
             if x > W - 200:

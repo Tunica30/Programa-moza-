@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Perfiles que vienen con el programa (sólo lectura, sirven de base).
 PROFILES_DIR = ROOT / "perfiles"
+
+
+def user_profiles_dir() -> Path:
+    """Carpeta donde se guardan TUS perfiles y la detección. Está fuera de la
+    carpeta del programa para no perderlos al bajar una versión nueva.
+    En Windows: %APPDATA%\\MozaBridge\\perfiles"""
+    override = os.environ.get("MOZA_BRIDGE_HOME")
+    if override:
+        return Path(override) / "perfiles"
+    base = os.environ.get("APPDATA")
+    if base:
+        return Path(base) / "MozaBridge" / "perfiles"
+    return Path.home() / ".moza_bridge" / "perfiles"
 
 # Botones de mando Xbox disponibles como destino.
 XBOX_BUTTONS = [
@@ -94,49 +109,68 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+def _read(p: Path) -> dict:
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_profile(path: str | Path | None) -> tuple[dict, Path]:
-    """Carga un perfil. Si no existe, devuelve la configuración por defecto
-    (se creará al guardar)."""
-    p = Path(path) if path else PROFILES_DIR / "general.json"
-    if p.suffix != ".json":
-        p = p.with_suffix(".json")
-    if not p.is_absolute() and not p.exists():
-        # "nfs_heat" -> perfiles/nfs_heat.json
-        p = PROFILES_DIR / p
-    data = {}
-    if p.exists():
-        with open(p, encoding="utf-8") as f:
-            data = json.load(f)
+    """Carga un perfil por nombre ("nfs_heat") o ruta a un .json.
+
+    Por nombre, primero busca en tu carpeta de usuario y si no está usa el
+    que viene con el programa. Siempre se guarda en tu carpeta de usuario.
+    Si no existe, devuelve la configuración por defecto."""
+    name = Path(path) if path else Path("general")
+    if name.suffix != ".json":
+        name = name.with_suffix(".json")
+    user_dir = user_profiles_dir()
+    if name.is_absolute() or len(name.parts) > 1:
+        src = save_path = name
+    else:
+        save_path = user_dir / name
+        src = save_path if save_path.exists() else PROFILES_DIR / name
+    data = _read(src) if src.exists() else {}
     cfg = _merge(DEFAULT_CONFIG, data)
-    general = PROFILES_DIR / "general.json"
-    if p.resolve() != general.resolve() and general.exists():
-        with open(general, encoding="utf-8") as f:
-            inherit_hardware(cfg, json.load(f))
-    return cfg, p
+    if name.name != "general.json":
+        for general in (user_dir / "general.json", PROFILES_DIR / "general.json"):
+            if general.exists():
+                inherit_hardware(cfg, _read(general))
+                break
+    return cfg, save_path
 
 
-def inherit_hardware(cfg: dict, base: dict) -> None:
-    """Completa la calibración de hardware (qué eje es cada cosa, reposo,
-    centro, rotación de la base y botones) desde el perfil general, para no
-    tener que detectar los periféricos en cada perfil de juego."""
+def inherit_hardware(cfg: dict, base: dict, force: bool = False) -> None:
+    """Copia la calibración de hardware (qué eje es cada cosa, reposo,
+    centro, rotación de la base, botones y palanca) desde ``base``.
+
+    Sin ``force`` sólo completa lo que falta (así un perfil de juego usa la
+    detección del perfil general); con ``force`` la reemplaza."""
     s, bs = cfg["steering"], base.get("steering", {})
-    if not s.get("axis") and bs.get("axis"):
+    if bs.get("axis") and (force or not s.get("axis")):
         for k in ("axis", "center", "invert", "hardware_rotation_deg"):
             if k in bs:
                 s[k] = bs[k]
     for key, pc in cfg["pedals"].items():
         bp = base.get("pedals", {}).get(key, {})
-        if not pc.get("axis") and bp.get("axis"):
+        if force or (not pc.get("axis") and bp.get("axis")):
             for k in ("axis", "rest", "full"):
                 if k in bp:
                     pc[k] = bp[k]
-    if not cfg.get("buttons") and base.get("buttons"):
+    if base.get("buttons") and (force or not cfg.get("buttons")):
         cfg["buttons"] = copy.deepcopy(base["buttons"])
     bsh = base.get("shifter", {})
-    if not cfg["shifter"].get("gears") and bsh.get("gears"):
-        cfg["shifter"]["gears"] = copy.deepcopy(bsh["gears"])
+    if force or (not cfg["shifter"].get("gears") and bsh.get("gears")):
+        cfg["shifter"]["gears"] = copy.deepcopy(bsh.get("gears", []))
         if "mode" in bsh:
             cfg["shifter"]["mode"] = bsh["mode"]
+
+
+def share_hardware(cfg: dict) -> None:
+    """Guarda la detección también en el perfil general, para que todos los
+    perfiles de juego la usen sin volver a detectar."""
+    general, path = load_profile("general")
+    inherit_hardware(general, cfg, force=True)
+    save_profile(general, path)
 
 
 def save_profile(cfg: dict, path: Path) -> None:
