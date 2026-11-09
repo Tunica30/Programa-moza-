@@ -1,0 +1,24 @@
+{
+  "profile_name": "Need for Speed Heat",
+  "steering": {
+    "game_rotation_deg": 360,
+    "deadzone": 0.0,
+    "gamma": 1.15,
+    "anti_deadzone": 0.05
+  },
+  "pedals": {
+    "throttle": {"deadzone": 0.03, "saturation": 0.95, "gamma": 1.0, "output": "right_trigger"},
+    "brake": {"deadzone": 0.04, "saturation": 0.80, "gamma": 1.3, "output": "left_trigger"},
+    "clutch": {"output": "none"}
+  },
+  "button_targets": [
+    {"label": "Freno de mano", "xbox": "A"},
+    {"label": "Nitro", "xbox": "B"},
+    {"label": "Mirar atrás", "xbox": "X"},
+    {"label": "Cambiar cámara", "xbox": "Y"},
+    {"label": "Marcha arriba (manual)", "xbox": "RB"},
+    {"label": "Marcha abajo (manual)", "xbox": "LB"},
+    {"label": "Pausa", "xbox": "START"},
+    {"label": "Mapa / reiniciar auto", "xbox": "BACK"}
+  ]
+}
